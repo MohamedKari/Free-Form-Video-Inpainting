@@ -1,0 +1,15 @@
+version: "2.4"
+
+services:
+  freeform:
+    # build time
+    image: freeform
+    container_name: freeform
+    build:
+      context: .
+    
+    # run time
+    runtime: nvidia # {nvidia | runc}
+    shm_size: 4gb
+    volumes: 
+      - /home/ubuntu/share/freeform:/app/data
