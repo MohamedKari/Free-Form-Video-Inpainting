@@ -95,8 +95,10 @@ class Trainer(BaseTrainer):
         real_i3d_activations = []
         with torch.no_grad():
             for batch_idx, data in enumerate(data_loader):
+                print("type(data)", data["input_tensors"].shape)
                 data_input, model_output = self._process_data(data)
                 inputs, outputs, targets, masks = self._unpack_data(data_input, model_output)
+                print("batch_idx", batch_idx)
                 if self.store_gated_values:
                     out_dir = os.path.join(output_root_dir, 'gated_values', f'input_{batch_idx:04}')
                     self._store_gated_values(out_dir)
@@ -263,6 +265,7 @@ class Trainer(BaseTrainer):
         targets = data["gt_tensors"].to(self.device)
         # guidances = self._get_edge_guidances(targets).to(self.device) if 'edge' in data['guidance'] else None
         guidances = data["guidances"].to(self.device) if len(data["guidances"]) > 0 else None
+
         data_input = {
             "inputs": inputs,
             "masks": masks,
@@ -270,7 +273,31 @@ class Trainer(BaseTrainer):
             "guidances": guidances
         }
 
-        model_output = self.model(inputs, masks, guidances)
+        inputs_chunked = torch.split(inputs, 3, dim=1)
+        masks_chunked = torch.split(masks, 3, dim=1)
+
+
+        output_tensors = []
+
+        for inputs_chunk, masks_chunk in zip(inputs_chunked, masks_chunked):
+            start_time = time.time()
+            output_chunk = self.model(inputs_chunk, masks_chunk, None)
+            duration = time.time() - start_time
+
+            masks_one = torch.ones_like(masks_chunk)[:,:-1]
+            print("masks_zero", masks_one.shape)
+            masks_chunk = torch.cat([masks_one, masks_chunk[:,-2:-1]], dim=1)
+            print("masks_chunk[:,-1]", masks_chunk[:,-2:-1].shape)
+            print("masks_chunk", masks_chunk.shape)
+
+            output_tensors.append(self.model(inputs_chunk, masks_chunk, None)["outputs"])
+
+            print(f"Model Inference took {duration}")
+
+        model_output = {
+            "outputs": torch.cat(output_tensors, 1)
+        }
+
         return data_input, model_output
 
     def _unpack_data(self, data_input, model_output):
