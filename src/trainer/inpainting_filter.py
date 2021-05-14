@@ -36,50 +36,46 @@ class InpaintingFilter:
 
         return self.inputs, self.masks
 
-filter = InpaintingFilter(
-    inputs=[0, 1, 2, 3, 4, 5], 
-    masks=[100, 101, 102, 103, 104, 105], 
-    window_size=3, 
-    noop_mask=1)
+def test():
 
-input_chunk, mask_chunk = filter.get()
-print("0", input_chunk, mask_chunk)
-assert input_chunk == [0, 1, 2], mask_chunk == [100, 101, 102]
+    filter = InpaintingFilter(
+        inputs=[0, 1, 2, 3, 4, 5], 
+        masks=[100, 101, 102, 103, 104, 105], 
+        window_size=3, 
+        noop_mask=1)
 
-# idempotency
-input_chunk, mask_chunk = filter.get()
-print("1", input_chunk, mask_chunk)
-assert input_chunk == [0, 1, 2], mask_chunk == [100, 101, 102]
+    input_chunks = [
+        [0, 1, 2],
+        [101, 204, 3],
+        [204, 309, 4],
+        [309, 416, 5]
+    ]
 
-output_chunk = [i * j for i, j in zip(input_chunk, mask_chunk)]
+    mask_chunks = [
+        [100, 101, 102],
+        [1, 1, 103],
+        [1, 1, 104],
+        [1, 1, 105]
+    ]
 
-filter.set(output_chunk)
-print("output_chunk", output_chunk)
+    while True:
+        next = filter.get()
+        if next:
+            input_chunk, mask_chunk = next
+        else:
+            return
 
-input_chunk, mask_chunk = filter.get()
-print("2", input_chunk, mask_chunk)
-assert input_chunk == [101, 204, 3], mask_chunk == [1, 1, 103]
+        print(input_chunk, mask_chunk)
+        expected_input_chunk = input_chunks[0]
+        del input_chunks[0]
+        
+        expected_mask_chunk = mask_chunks[0]
+        del mask_chunks[0]
 
-output_chunk = [i * j for i, j in zip(input_chunk, mask_chunk)]
+        assert input_chunk == expected_input_chunk, mask_chunk == expected_mask_chunk
 
-filter.set(output_chunk)
-print("output_chunk", output_chunk)
+        output_chunk = [i * j for i, j in zip(input_chunk, mask_chunk)]
+        filter.set(output_chunk)
+        print("output_chunk", output_chunk)
 
-input_chunk, mask_chunk = filter.get()
-print("3", input_chunk, mask_chunk)
-assert input_chunk == [204, 309, 4], mask_chunk == [1, 1, 104]
-
-output_chunk = [i * j for i, j in zip(input_chunk, mask_chunk)]
-
-filter.set(output_chunk)
-print("output_chunk", output_chunk)
-
-input_chunk, mask_chunk = filter.get()
-print("4", input_chunk, mask_chunk)
-assert input_chunk == [309, 416, 5], mask_chunk == [1, 1, 105]
-
-
-
-
-
-# output_chunk_1 = [i * j for i, j in zip(input_chunk_1, mask_chunk_1)]
+test()
