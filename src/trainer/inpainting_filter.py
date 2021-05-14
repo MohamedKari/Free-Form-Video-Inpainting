@@ -36,6 +36,9 @@ class InpaintingFilter:
 
         return self.inputs, self.masks
 
+    def outputs(self):
+        return self.outputs
+
 def test():
 
     filter = InpaintingFilter(
@@ -78,4 +81,5 @@ def test():
         filter.set(output_chunk)
         print("output_chunk", output_chunk)
 
-test()
+if __name__ == "__main__":
+    test()

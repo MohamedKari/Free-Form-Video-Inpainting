@@ -1,5 +1,6 @@
 import os
 import time
+from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -11,6 +12,7 @@ from evaluate import get_fid_score, get_i3d_activations, init_i3d_model, evaluat
 from utils.readers import save_frames_to_dir
 from model.loss import AdversarialLoss
 
+from trainer.inpainting_filter import InpaintingFilter
 
 class Trainer(BaseTrainer):
     """
@@ -95,7 +97,7 @@ class Trainer(BaseTrainer):
         real_i3d_activations = []
         with torch.no_grad():
             for batch_idx, data in enumerate(data_loader):
-                print("type(data)", data["input_tensors"].shape)
+                print('data["input_tensors"].shape', data["input_tensors"].shape)
                 data_input, model_output = self._process_data(data)
                 inputs, outputs, targets, masks = self._unpack_data(data_input, model_output)
                 print("batch_idx", batch_idx)
@@ -273,30 +275,46 @@ class Trainer(BaseTrainer):
             "guidances": guidances
         }
 
-        inputs_chunked = torch.split(inputs, 3, dim=1)
-        masks_chunked = torch.split(masks, 3, dim=1)
+        if True:
+            inputs_list = torch.split(inputs, 1, dim=1)
+            masks_list = torch.split(masks, 1, dim=1)
+            noop_mask = torch.ones_like(masks_list[0])
+            print("noop_mask.shape", noop_mask.shape)
 
+            filter = InpaintingFilter(
+                inputs=inputs_list, 
+                masks=masks_list, 
+                window_size=3, 
+                noop_mask=noop_mask)
 
-        output_tensors = []
+            next = filter.get()
 
-        for inputs_chunk, masks_chunk in zip(inputs_chunked, masks_chunked):
-            start_time = time.time()
-            output_chunk = self.model(inputs_chunk, masks_chunk, None)
-            duration = time.time() - start_time
+            while next:
+                input_chunk, mask_chunk = next
+                print(input_chunk, mask_chunk)
+                input_chunk = torch.cat(input_chunk, dim=1)
+                mask_chunk = torch.cat(mask_chunk, dim=1)
+                
+                print("input_chunk", input_chunk.shape, "inputs", inputs.shape)
 
-            masks_one = torch.ones_like(masks_chunk)[:,:-1]
-            print("masks_zero", masks_one.shape)
-            masks_chunk = torch.cat([masks_one, masks_chunk[:,-2:-1]], dim=1)
-            print("masks_chunk[:,-1]", masks_chunk[:,-2:-1].shape)
-            print("masks_chunk", masks_chunk.shape)
+                start_time = time.time()
+                output_tensor = self.model(input_chunk, mask_chunk, None)
+                print(f"Model Inference took {time.time() - start_time}")
+                print('D', output_tensor["outputs"].shape)
+                output_frame_chunk = torch.split(output_tensor["outputs"], 1, dim=1)
+                print("len(output_frame_chunk)", len(output_frame_chunk))
+                print("output_frame_chunk[0]", output_frame_chunk[0].shape)
+                
 
-            output_tensors.append(self.model(inputs_chunk, masks_chunk, None)["outputs"])
+                filter.set(output_frame_chunk)
 
-            print(f"Model Inference took {duration}")
-
-        model_output = {
-            "outputs": torch.cat(output_tensors, 1)
-        }
+                next = filter.get()
+                
+            model_output = {
+                "outputs": torch.cat(filter.outputs, 1) # 1?
+            }
+        else:
+            model_output = self.model(inputs, masks, guidances)
 
         return data_input, model_output
 
