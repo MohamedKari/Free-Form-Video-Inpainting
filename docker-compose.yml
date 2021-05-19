@@ -11,5 +11,7 @@ services:
     # run time
     runtime: nvidia # {nvidia | runc}
     shm_size: 4gb
+    ports:
+      - "50051:50051"
     volumes: 
       - /home/ubuntu/share/freeform:/app/data

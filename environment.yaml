@@ -4,6 +4,9 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  - fire
+  - grpcio=1.23.0
+  - grpcio-tools=1.16.1
   - blas=1.0=mkl
   - bzip2=1.0.6=h470a237_2
   - cairo=1.14.12=h276e583_5
