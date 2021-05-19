@@ -1,0 +1,11 @@
+name: ffvi-dev
+channels:
+ - defaults
+ - conda-forge
+dependencies:
+ - python=3.7.1
+ - fire
+ - pip
+ - pip:
+     - grpcio==1.23.0
+     - grpcio-tools==1.16.1
