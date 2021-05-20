@@ -201,5 +201,7 @@ class Inpainter:
             )
             print("self.input_mask_chunk[0].shape", self.input_mask_chunk[0].shape)
             
+            self.first_chunk_processed = True
+            
         return current_inpainted_frame[0, 0]
     
