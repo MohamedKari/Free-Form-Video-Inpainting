@@ -78,8 +78,13 @@ class Inpainter:
         self.model.load_state_dict(checkpoint['state_dict'])
         self.model.summary()
 
-        self.window_size = 5
-        self.output_frames = deque(maxlen=self.window_size-1)
+        self.window_size = 3
+
+        self.input_frame_chunk = deque(maxlen=self.window_size)
+        self.input_mask_chunk = deque(maxlen=self.window_size)
+
+        self.first_chunk_processed = False
+
         self._test_realtime()
 
     def _test_one_off(self):
@@ -153,25 +158,48 @@ class Inpainter:
         assert len(frame.shape) == 3
         assert len(mask.shape) == 3
 
-        frame = torch.unsqueeze(frame, dim=0)
-        frame = torch.unsqueeze(frame, dim=0)
+        input_frame = frame
+        input_frame = torch.unsqueeze(input_frame, dim=0)
+        input_frame = torch.unsqueeze(input_frame, dim=0)
 
-        mask = torch.unsqueeze(mask, dim=0)
-        mask = torch.unsqueeze(mask, dim=0)
-        
-        noop_mask = torch.ones_like(mask)
-        
-        input_frame_chunk = list(self.output_frames) + [frame]
-        input_mask_chunk = [noop_mask] * len(self.output_frames) + [mask]
-        
-        input_tensor = torch.cat(input_frame_chunk, dim=1)
-        input_mask_chunk = torch.cat(input_mask_chunk, dim=1)
+        input_mask = mask
+        input_mask = torch.unsqueeze(input_mask, dim=0)
+        input_mask = torch.unsqueeze(input_mask, dim=0)
+
+
+        self.input_frame_chunk.append(input_frame)
+        self.input_mask_chunk.append(input_mask)
+        print("input_mask.shape", input_mask.shape)
+
+        if len(self.input_mask_chunk) < self.window_size:
+            return torch.zeros_like(frame)
+            
+        input_tensor = torch.cat(list(self.input_frame_chunk), dim=1)
+        input_mask_chunk = torch.cat(list(self.input_mask_chunk), dim=1)
 
         output_tensor = self.inpaint_one_off(input_tensor, input_mask_chunk)
-        
-        current_inpainted_frame = output_tensor[:,-1:]
 
-        self.output_frames.append(current_inpainted_frame)
+        current_inpainted_frame = output_tensor[:,-1:]
         
+        if self.first_chunk_processed:
+            self.input_frame_chunk.pop()
+            self.input_frame_chunk.append(current_inpainted_frame)
+
+            self.input_mask_chunk.pop()
+            self.input_mask_chunk.append(torch.ones_like(input_mask))
+            print("torch.ones_like(input_mask).shape", torch.ones_like(input_mask).shape)
+        else:
+
+            self.input_frame_chunk = deque(
+                torch.split(output_tensor, 1, dim=1),
+                self.input_frame_chunk.maxlen
+            )
+
+            self.input_mask_chunk = deque(
+                [torch.ones_like(input_mask)] * self.input_mask_chunk.maxlen,
+                self.input_mask_chunk.maxlen
+            )
+            print("self.input_mask_chunk[0].shape", self.input_mask_chunk[0].shape)
+            
         return current_inpainted_frame[0, 0]
-        
+    
