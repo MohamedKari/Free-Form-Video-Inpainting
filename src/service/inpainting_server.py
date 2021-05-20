@@ -1,3 +1,6 @@
+
+
+
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
 import logging
@@ -9,11 +12,13 @@ import time
 
 import grpc
 
-from .log import setup_logger
+from inpainter import Inpainter
 
-from .inpainting_service_pb2_grpc import InpainterServicer, add_InpainterServicer_to_server
+from service.log import setup_logger
 
-from .inpainting_service_pb2 import (
+from service.inpainting_service_pb2_grpc import InpainterServicer, add_InpainterServicer_to_server
+
+from service.inpainting_service_pb2 import (
     Empty,
     StartInpaintingSessionResponse,
     InpaintRequest,
@@ -50,6 +55,7 @@ class InpainterServicer(InpainterServicer):
         
         context.set_code(grpc.StatusCode.OK)
         context.set_details('Created new session.')
+        
         return StartInpaintingSessionResponse(
             SessionId=session_id
         )
