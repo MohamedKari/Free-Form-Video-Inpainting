@@ -5,6 +5,7 @@ import glob
 from pathlib import Path
 from typing import List, Tuple
 import time
+from collections import deque
 
 import torch
 from PIL import Image, ImageOps
@@ -45,8 +46,8 @@ def get_instance(module, name, config, *args):
 
 def load_data() -> Tuple[List[torch.tensor], List[torch.tensor]]:
     print("getting frame_paths")
-    frame_paths = sorted(glob.glob(str(Path(IMAGE_DIRECTORY) / "1-resized/batch/*.jpg")))[0:3]
-    mask_paths = sorted(glob.glob(str(Path(IMAGE_DIRECTORY) / "3-mask/batch/*.png")))[0:3]
+    frame_paths = sorted(glob.glob(str(Path(IMAGE_DIRECTORY) / "1-resized/batch/*.jpg")))[0:15]
+    mask_paths = sorted(glob.glob(str(Path(IMAGE_DIRECTORY) / "3-mask/batch/*.png")))[0:15]
     print("frame_paths", frame_paths, flush=True)
     print("mask_paths", mask_paths, flush=True)
 
@@ -66,20 +67,22 @@ def load_data() -> Tuple[List[torch.tensor], List[torch.tensor]]:
 
 class Inpainter:
     def __init__(self) -> None:
-
-        print("Initing inpainter", flush=True)
-
+        
         config = torch.load(CHECKPOINT_PATH)['config']
         dataset_config = json.load(open(DATASET_CONFIG_PATH))
         config = override_data_setting(config, dataset_config)
-        # main(config, CHECKPOINT_PATH, OUTPUT_ROOT_DIRECTORY, None)
-
         checkpoint = torch.load(CHECKPOINT_PATH)
+
         self.model = get_instance(module_arch, 'arch', config)
         self.model = self.model.to("cuda:0")
         self.model.load_state_dict(checkpoint['state_dict'])
         self.model.summary()
-        
+
+        self.window_size = 5
+        self.output_frames = deque(maxlen=self.window_size-1)
+        self._test_realtime()
+
+    def _test_one_off(self):
         print("Loading data", flush=True)
         data = load_data()
 
@@ -90,7 +93,7 @@ class Inpainter:
         frame_tensor, mask_tensor = self.pack_to_input_tensor(frames, masks)
         print("frame_tensor.shape, mask_tensor.shape", frame_tensor.shape, mask_tensor.shape)
         
-        inpainted_tensor = self.inpaint(frame_tensor, mask_tensor)
+        inpainted_tensor = Inpainter.inpaint_one_off(frame_tensor, mask_tensor)
         batch_count, batch_size, channel_count, height, width = inpainted_tensor.shape
 
         timestamp = int(time.time() * 1000)
@@ -100,6 +103,20 @@ class Inpainter:
             inpainted_image = to_pil_image(inpainted_tensor[0,i].cpu())
             inpainted_image.save(str(output_dir / f"{i}.jpg"))
 
+
+    def _test_realtime(self):
+        data = load_data()
+
+        timestamp = int(time.time() * 1000)
+        output_dir = Path(OUTPUT_ROOT_DIRECTORY) / str(timestamp) 
+        output_dir.mkdir(parents=True, exist_ok=False)
+        i = 0
+        for frame, mask in zip(*data):
+            print(frame.shape, mask.shape, flush=True)
+            inpainted_tensor = self.inpaint_next(frame, mask)
+            inpainted_image = to_pil_image(inpainted_tensor.cpu())
+            inpainted_image.save(str(output_dir / f"{i}.jpg"))
+            i += 1
 
 
     def pack_to_input_tensor(self, frames: List[torch.Tensor], masks: List[torch.Tensor]):
@@ -111,21 +128,50 @@ class Inpainter:
 
         return frames, masks
 
-    def inpaint(self, frames: torch.Tensor, masks: torch.Tensor):
-        assert len(frames.shape) == 5
-        assert len(masks.shape) == 5
+
+    def inpaint_one_off(self, frames_tensor: torch.Tensor, masks_tensor: torch.Tensor):
+        assert len(frames_tensor.shape) == 5
+        assert len(masks_tensor.shape) == 5
         
-        batch_count, batch_size, channel_count, height, width = frames.shape
+        batch_count, batch_size, channel_count, height, width = frames_tensor.shape
         assert batch_count == 1
         assert channel_count == 3
 
-        batch_count, batch_size, channel_count, height, width = masks.shape
+        batch_count, batch_size, channel_count, height, width = masks_tensor.shape
         assert batch_count == 1
         assert channel_count == 1
 
         with torch.no_grad():
             start_time = time.time()
-            output_dict = self.model(frames, masks, None)
+            output_dict = self.model(frames_tensor, masks_tensor, None)
             print(f"Model Inference took {time.time() - start_time}")
 
         return output_dict["outputs"]
+
+
+    def inpaint_next(self, frame: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        assert len(frame.shape) == 3
+        assert len(mask.shape) == 3
+
+        frame = torch.unsqueeze(frame, dim=0)
+        frame = torch.unsqueeze(frame, dim=0)
+
+        mask = torch.unsqueeze(mask, dim=0)
+        mask = torch.unsqueeze(mask, dim=0)
+        
+        noop_mask = torch.ones_like(mask)
+        
+        input_frame_chunk = list(self.output_frames) + [frame]
+        input_mask_chunk = [noop_mask] * len(self.output_frames) + [mask]
+        
+        input_tensor = torch.cat(input_frame_chunk, dim=1)
+        input_mask_chunk = torch.cat(input_mask_chunk, dim=1)
+
+        output_tensor = self.inpaint_one_off(input_tensor, input_mask_chunk)
+        
+        current_inpainted_frame = output_tensor[:,-1:]
+
+        self.output_frames.append(current_inpainted_frame)
+        
+        return current_inpainted_frame[0, 0]
+        
