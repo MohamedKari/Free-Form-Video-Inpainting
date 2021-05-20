@@ -11,7 +11,11 @@ services:
     # run time
     runtime: nvidia # {nvidia | runc}
     shm_size: 4gb
+    environment: 
+      - CUDA_VISIBLE_DEVICE=1,3
+      - GPU_ID=cuda:0
     ports:
       - "50051:50051"
     volumes: 
       - /home/ubuntu/share/freeform:/app/data
+    # networks: [core]
