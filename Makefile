@@ -7,7 +7,7 @@ dev-env:
 .PHONY: proto
 proto: 
 	@# https://github.com/grpc/grpc/issues/9575#issuecomment-293934506
-	python -m grpc_tools.protoc -I proto --python_out=. --grpc_python_out=. proto/src/service/*.proto
+	python -m grpc_tools.protoc -I realtery-protos/spec/inpainting --python_out=. --grpc_python_out=. realtery-protos/spec/inpainting/src/service/*.proto
 
 docker-server: 
 	DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker-compose up --build freeform

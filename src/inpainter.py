@@ -39,12 +39,14 @@ class Inpainter:
         self.model.load_state_dict(checkpoint['state_dict'])
         self.model.summary()
 
-        self.window_size = 4
+        self.window_size = 1
 
         self.input_frame_chunk = deque(maxlen=self.window_size)
         self.input_mask_chunk = deque(maxlen=self.window_size)
 
         self.first_chunk_processed = False
+
+        self.frame_counter = 0
 
         # self._test_realtime()
 
@@ -116,6 +118,8 @@ class Inpainter:
 
 
     def inpaint_next(self, frame: torch.Tensor, mask: torch.Tensor, ramp_up=True) -> torch.Tensor:
+        self.frame_counter += 1
+         
         assert len(frame.shape) == 3
         assert len(mask.shape) == 3
         assert frame.shape[0] == 3
@@ -130,10 +134,9 @@ class Inpainter:
         input_mask = torch.unsqueeze(input_mask, dim=0)
 
 
+        print("valrange", torch.min(mask), torch.max(mask), torch.min(frame), torch.max(frame))
         assert torch.all((mask == 0.) + (mask == 1.)) # or
         assert torch.all((frame >= 0.) * (frame <= 1.)) # and
-
-        print("valrange", torch.min(mask), torch.max(mask), torch.min(frame), torch.max(frame))
 
         self.input_frame_chunk.append(input_frame)
         self.input_mask_chunk.append(input_mask)

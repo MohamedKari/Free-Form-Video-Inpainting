@@ -94,7 +94,7 @@ class InpainterServicer(InpainterServicer):
             # logging.getLogger(__name__).debug("[%s] Responding with offsetted frame ...", inpainted_frame_id)
             return InpaintResponse(
                 InpaintedFrame=inpainted_bytes,
-                InpaintedFrameId=0 # TODO
+                InpaintedFrameId=inpainter.frame_counter
             )
         except Exception as e:
             print(type(e))
