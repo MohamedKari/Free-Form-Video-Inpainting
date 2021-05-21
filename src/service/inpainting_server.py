@@ -11,6 +11,8 @@ import pprint
 import time
 
 import grpc
+import torch
+from torch.tensor import Tensor
 
 from inpainter import Inpainter
 
@@ -24,6 +26,8 @@ from service.inpainting_service_pb2 import (
     InpaintRequest,
     InpaintResponse, 
     ReportBenchmarksResponse)
+
+from data_utils import tensor_to_tensor_bytes, tensor_bytes_to_tensor
 
 class InpainterServicer(InpainterServicer):
 
@@ -60,58 +64,44 @@ class InpainterServicer(InpainterServicer):
             SessionId=session_id
         )
 
-"""
-
- 
-
     def Inpaint(self, request: InpaintRequest, context) -> InpaintResponse:
         try:
             session_id: str = request.SessionId
-            image: bytes = request.Image
-            mask: bytes = request.Mask
+            image_bytes: bytes = request.Image
+            mask_bytes: bytes = request.Mask
             logging.getLogger(__name__).debug("retrieving inpainter for session_id %s", session_id)
             inpainter = self.sessions[session_id]
 
-            self.log_request("Inpaint", inpainter.T, request, context)
+            self.log_request("Inpaint", None, request, context)
 
-            with benchmarks("deep_video_inpainting.input_deserialization"):
+            # with benchmarks("deep_video_inpainting.input_deserialization"):
+            image_tensor = tensor_bytes_to_tensor(image_bytes)
+            mask_tensor = tensor_bytes_to_tensor(mask_bytes)
+            logging.getLogger(__name__).debug("Received image tensor of shape %s and mask tensor of shape %s ", image_tensor.shape, mask_tensor.shape)
 
-                image_bytesio = BytesIO(image)
-                image_bytesio.seek(0)
-                image_tensor = torch.load(image_bytesio, map_location="cpu") / 255.
+            # with benchmarks("deep_video_inpainting.inpainting"):
+            inpainted_frame_tensor = inpainter.inpaint_next(
+                image_tensor,
+                mask_tensor)
 
-                mask_bytesio = BytesIO(mask)
-                mask_bytesio.seek(0)
-                mask_tensor = torch.load(mask_bytesio, map_location="cpu") / 255.
-
-            with benchmarks("deep_video_inpainting.inpainting"):
-                inpainted_frame_np, inpainted_frame_id = inpainter.inpaint(
-                    image_tensor,
-                    mask_tensor)
-
-            with benchmarks("deep_video_inpainting.output_serialization"):
-                if inpainted_frame_np is not None: 
-                    logging.getLogger(__name__).debug("inpainted_frame.shape: %s", inpainted_frame_np.shape)
-                    inpainted_bytesio = BytesIO()
-                    torch.save(inpainted_frame_np, inpainted_bytesio)
-                    inpainted_bytesio.seek(0)
-                    inpainted_bytes = inpainted_bytesio.read()
-                else:
-                    inpainted_bytes = bytes(False)
+            # with benchmarks("deep_video_inpainting.output_serialization"):
+            # logging.getLogger(__name__).debug("inpainted_frame.shape: %s", inpainted_frame_tensor.shape)
+            inpainted_bytes = tensor_to_tensor_bytes(inpainted_frame_tensor)
 
             context.set_code(grpc.StatusCode.OK)
             context.set_details("Everything OK.")
 
-            logging.getLogger(__name__).debug("[%s] Responding with offsetted frame ...", inpainted_frame_id)
+            # logging.getLogger(__name__).debug("[%s] Responding with offsetted frame ...", inpainted_frame_id)
             return InpaintResponse(
                 InpaintedFrame=inpainted_bytes,
-                InpaintedFrameId=inpainted_frame_id
+                InpaintedFrameId=0 # TODO
             )
         except Exception as e:
             print(type(e))
             print(e)
             raise e
 
+"""
     def ReportBenchmarks(self, request: google_dot_protobuf_dot_empty__pb2, context) -> ReportBenchmarksResponse:
         self.log_request("ReportBenchmarks", None, request, context)
 
@@ -120,6 +110,7 @@ class InpainterServicer(InpainterServicer):
         return ReportBenchmarksResponse(
             BenchmarkReport=benchmark_report
         )
+
 
 """
 
@@ -137,16 +128,14 @@ def serve():
     server = grpc.server(
         ThreadPoolExecutor(max_workers=1),
         options=[
-            ("grpc.max_send_message_length", 10_000_000),
-            ("grpc.max_receive_message_length", 10_000_000),
-            ("grpc.max_message_length", 10_000_000)
+            ("grpc.max_send_message_length", 20_000_000),
+            ("grpc.max_receive_message_length", 20_000_000),
+            ("grpc.max_message_length", 20_000_000)
         ])
 
     add_InpainterServicer_to_server(
         InpainterServicer(), 
         server)
-
-    # cd src && python train.py -r ../data/v0.2.3_GatedTSM_inplace_noskip_b2_back_L1_vgg_style_TSMSNTPD128_1_1_10_1_VOR_allMasks_load135_e135_pdist0.1256.pth --dataset_config  other_configs/inference_example.json -od ../data/test_outputs
 
     server.add_insecure_port("[::]:50051")
     register_stop_signal_handler(server)

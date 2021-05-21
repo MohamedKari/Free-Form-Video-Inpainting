@@ -14,6 +14,7 @@ from torchvision.transforms.functional import to_pil_image
 
 import model.free_form_inpainting_archs as module_arch
 from train import override_data_setting, main
+from data_utils import load_data, to_tensor
 
 CHECKPOINT_PATH = "../data/v0.2.3_GatedTSM_inplace_noskip_b2_back_L1_vgg_style_TSMSNTPD128_1_1_10_1_VOR_allMasks_load135_e135_pdist0.1256.pth"
 DATASET_CONFIG_PATH = "other_configs/inference_example.json"
@@ -21,49 +22,9 @@ OUTPUT_ROOT_DIRECTORY = "../data/test_outputs"
 IMAGE_DIRECTORY = "../custom-examples/7-tram-frames-square/"
 
 
-def to_tensor(image: Image.Image) -> torch.Tensor:
-    image_np = np.asarray(image)
-    
-    assert image_np.dtype == np.uint8
-
-    image_tensor = torch.tensor(image_np, device="cuda")
-    image_tensor = image_tensor.type(torch.float32)
-    image_tensor = image_tensor / 255.
-    
-    if len(image_tensor.shape) == 3:
-        # color image
-        image_tensor = image_tensor.permute([2, 0, 1])
-    elif len(image_tensor.shape) == 2:
-        # greyscale image 
-        image_tensor = torch.unsqueeze(image_tensor, 0)
-    
-    
-    return image_tensor
-
-
 def get_instance(module, name, config, *args):
     return getattr(module, config[name]['type'])(*args, **config[name]['args'])
 
-def load_data() -> Tuple[List[torch.tensor], List[torch.tensor]]:
-    print("getting frame_paths")
-    frame_paths = sorted(glob.glob(str(Path(IMAGE_DIRECTORY) / "1-resized/batch/*.jpg")))[0:15]
-    mask_paths = sorted(glob.glob(str(Path(IMAGE_DIRECTORY) / "3-mask/batch/*.png")))[0:15]
-    print("frame_paths", frame_paths, flush=True)
-    print("mask_paths", mask_paths, flush=True)
-
-    width, height = 300, 300
-
-    frames = [ Image.open(str(frame_path)) for frame_path in frame_paths ]
-    frames = [ frame.resize((width, height)) for frame in frames ]
-    frames = [ to_tensor(frame) for frame in frames ]
-   
-    masks = [ Image.open(str(mask_path)).convert("L") for mask_path in mask_paths ]
-    masks = [ masks.resize((width, height)) for masks in masks ]
-    masks = [ ImageOps.invert(mask) for mask in masks ]
-    masks = [ mask.point(lambda x: 0 if x < 255 else 255) for mask in masks ]
-    masks = [ to_tensor(mask) for mask in masks ]
-
-    return frames, masks
 
 class Inpainter:
     def __init__(self) -> None:
@@ -78,18 +39,18 @@ class Inpainter:
         self.model.load_state_dict(checkpoint['state_dict'])
         self.model.summary()
 
-        self.window_size = 3
+        self.window_size = 4
 
         self.input_frame_chunk = deque(maxlen=self.window_size)
         self.input_mask_chunk = deque(maxlen=self.window_size)
 
         self.first_chunk_processed = False
 
-        self._test_realtime()
+        # self._test_realtime()
 
     def _test_one_off(self):
         print("Loading data", flush=True)
-        data = load_data()
+        data = load_data(IMAGE_DIRECTORY)
 
         for frame, mask in zip(*data):
             print(frame.shape, mask.shape, flush=True)
@@ -110,7 +71,7 @@ class Inpainter:
 
 
     def _test_realtime(self):
-        data = load_data()
+        data = load_data(IMAGE_DIRECTORY)
 
         timestamp = int(time.time() * 1000)
         output_dir = Path(OUTPUT_ROOT_DIRECTORY) / str(timestamp) 
@@ -154,9 +115,11 @@ class Inpainter:
         return output_dict["outputs"]
 
 
-    def inpaint_next(self, frame: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    def inpaint_next(self, frame: torch.Tensor, mask: torch.Tensor, ramp_up=True) -> torch.Tensor:
         assert len(frame.shape) == 3
         assert len(mask.shape) == 3
+        assert frame.shape[0] == 3
+        assert mask.shape[0] == 1
 
         input_frame = frame
         input_frame = torch.unsqueeze(input_frame, dim=0)
@@ -167,11 +130,15 @@ class Inpainter:
         input_mask = torch.unsqueeze(input_mask, dim=0)
 
 
+        assert torch.all((mask == 0.) + (mask == 1.)) # or
+        assert torch.all((frame >= 0.) * (frame <= 1.)) # and
+
+        print("valrange", torch.min(mask), torch.max(mask), torch.min(frame), torch.max(frame))
+
         self.input_frame_chunk.append(input_frame)
         self.input_mask_chunk.append(input_mask)
-        print("input_mask.shape", input_mask.shape)
 
-        if len(self.input_mask_chunk) < self.window_size:
+        if ramp_up and len(self.input_mask_chunk) < self.window_size:
             return torch.zeros_like(frame)
             
         input_tensor = torch.cat(list(self.input_frame_chunk), dim=1)
@@ -187,7 +154,6 @@ class Inpainter:
 
             self.input_mask_chunk.pop()
             self.input_mask_chunk.append(torch.ones_like(input_mask))
-            print("torch.ones_like(input_mask).shape", torch.ones_like(input_mask).shape)
         else:
 
             self.input_frame_chunk = deque(
