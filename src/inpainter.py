@@ -39,7 +39,7 @@ class Inpainter:
         self.model.load_state_dict(checkpoint['state_dict'])
         self.model.summary()
 
-        self.window_size = 1
+        self.window_size = 3
 
         self.input_frame_chunk = deque(maxlen=self.window_size)
         self.input_mask_chunk = deque(maxlen=self.window_size)
@@ -156,7 +156,8 @@ class Inpainter:
             self.input_frame_chunk.append(current_inpainted_frame)
 
             self.input_mask_chunk.pop()
-            self.input_mask_chunk.append(torch.ones_like(input_mask))
+            #self.input_mask_chunk.append(torch.ones_like(input_mask))
+            self.input_mask_chunk.append(input_mask)
         else:
 
             self.input_frame_chunk = deque(
